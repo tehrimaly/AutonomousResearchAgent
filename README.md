@@ -1,165 +1,197 @@
 # Autonomous Research Agent
 
-An advanced AI agent built with **LangGraph**, **Anthropic Claude**, and **FastAPI** that autonomously researches any topic by decomposing it into sub-tasks, searching the web, executing Python code in a sandboxed Docker container, and synthesizing a final report — all in a self-directed ReAct loop.
+> An advanced AI agent that autonomously researches any topic — breaking queries into sub-tasks, searching the web, executing code in a sandboxed Docker container, and synthesizing a final report. Built with **LangGraph**, **Google Gemini**, **FastAPI**, and **Docker**.
+
+![Python](https://img.shields.io/badge/Python-3.11-blue?style=flat-square)
+![LangGraph](https://img.shields.io/badge/LangGraph-0.2.28-green?style=flat-square)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-teal?style=flat-square)
+![Gemini](https://img.shields.io/badge/Google-Gemini-orange?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
 
 ---
 
-## Architecture
+## What It Does
+
+You type a research question. The agent figures out the rest — no human intervention needed at each step.
+
+**The agent autonomously:**
+1.  Breaks your question into 3–5 focused sub-tasks (Planner)
+2.  Searches the web for each sub-task using Playwright + DuckDuckGo
+3.  Writes and runs Python code in an isolated Docker container
+4.  Stores findings in a semantic memory layer (ChromaDB)
+5.  Synthesizes everything into a structured final report
+6.  Streams every step live to a real-time dashboard UI
+
+---
+
+##  Architecture
 
 ```
 User Query
-   │
-   ▼
-Planner Node         ← decomposes query into 3-5 sub-tasks
-   │
-   ▼
-ReAct Loop ──────────────────────────────────────┐
-│  Think  →  Act (tool call)  →  Observe         │
-│      └──────────────────────────────┘          │
-│  Tools: web_search | execute_python | write_file│
-└─────────────────────────────────────────────────┘
-   │ (all sub-tasks complete)
-   ▼
-Synthesizer Node     ← merges findings → final report
-   │
-   ▼
-FastAPI SSE Stream   ← streams every node update to the client
+    │
+    ▼
+┌─────────────┐
+│   Planner   │  ← Gemini decomposes query into 3-5 sub-tasks
+└──────┬──────┘
+       │
+       ▼
+┌──────────────────────────────────┐
+│          ReAct Loop              │
+│   Think → Tool Call → Observe   │  ← Repeats until TASK_COMPLETE
+│                                  │
+│   Tools available:               │
+│   • web_search  (Playwright)     │
+│   • execute_python  (Docker)     │
+│   • write_file  (disk)           │
+└──────┬───────────────────────────┘
+       │  (all sub-tasks complete)
+       ▼
+┌─────────────┐
+│ Synthesizer │  ← Merges all findings into final report
+└──────┬──────┘
+       │
+       ▼
+FastAPI SSE Stream → Real-time Dashboard UI
 ```
 
 ---
 
-## Quick Start
+##  Quick Start
 
-### 1. Clone & configure
+### Prerequisites
+- Python 3.11+
+- Docker Desktop (for sandboxed code execution)
+- Google Gemini API key — **free** at [aistudio.google.com](https://aistudio.google.com)
 
+### 1. Clone the repo
 ```bash
-git clone <your-repo>
-cd research_agent
-cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+git clone https://github.com/tehrimaly/autonomous-research-agent.git
+cd autonomous-research-agent
 ```
 
-### 2. Install dependencies
-
+### 2. Set up environment
 ```bash
-python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac/Linux
+
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 3. Pre-build the code sandbox image
-
+### 3. Add your API key
 ```bash
-docker build -f docker/sandbox.Dockerfile -t python:3.11-slim-sandbox docker/
+# Create .env file
+echo "GOOGLE_API_KEY=your-key-here" > .env
 ```
 
-### 4. Run the API server
-
+### 4. Start the server
 ```bash
 uvicorn api.main:app --reload --port 8000
 ```
 
-### 5. Send a research request
-
-```bash
-curl -X POST http://localhost:8000/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are the top 3 Python ML libraries by GitHub stars in 2025?"}' \
-  --no-buffer
-```
-
-You will see a stream of JSON events as the agent thinks, uses tools, and writes its report.
+### 5. Open the UI
+Open `research_agent_ui.html` in your browser, type a question, and hit **Run**!
 
 ---
 
-## Running with Docker Compose
-
-```bash
-docker compose up --build
-```
-
-This starts the agent API on port 8000 with:
-- Outputs mounted at `./outputs`
-- ChromaDB persisted at `./chroma_db`
-- Docker socket mounted so the agent can spawn sandbox containers
-
----
-
-## Running tests
-
-```bash
-# Unit tests only (no API key needed)
-pytest tests/ -v -m "not integration"
-
-# All tests including end-to-end (requires ANTHROPIC_API_KEY)
-pytest tests/ -v
-```
-
----
-
-## Project structure
+##  Project Structure
 
 ```
-research_agent/
+autonomous-research-agent/
 ├── agent/
-│   ├── graph.py          ← LangGraph state machine (ReAct loop)
-│   ├── planner.py        ← query decomposition
-│   ├── synthesizer.py    ← report generation
-│   └── state.py          ← shared TypedDict state schema
+│   ├── graph.py           # LangGraph state machine (the brain)
+│   ├── planner.py         # Decomposes query into sub-tasks
+│   ├── synthesizer.py     # Merges findings into final report
+│   └── state.py           # Shared TypedDict state schema
 ├── tools/
-│   ├── web_search.py     ← Playwright + DuckDuckGo with retries
-│   ├── code_executor.py  ← Docker-sandboxed Python runner
-│   └── file_writer.py    ← persistent intermediate file store
+│   ├── web_search.py      # Playwright + DuckDuckGo with retries
+│   ├── code_executor.py   # Docker-sandboxed Python runner
+│   └── file_writer.py     # Saves intermediate findings to disk
 ├── memory/
-│   └── store.py          ← ChromaDB semantic memory layer
+│   └── store.py           # ChromaDB semantic memory layer
 ├── api/
-│   └── main.py           ← FastAPI + SSE streaming server
+│   └── main.py            # FastAPI server with SSE streaming
 ├── docker/
-│   └── sandbox.Dockerfile
+│   └── sandbox.Dockerfile # Isolated code execution container
 ├── tests/
 │   └── test_graph.py
-├── Dockerfile
-├── docker-compose.yml
+├── research_agent_ui.html # Real-time dashboard
 ├── requirements.txt
 └── .env.example
 ```
 
 ---
 
-## Key design decisions
+##  Key Technical Decisions
 
 | Decision | Why |
-|---|---|
-| LangGraph state machine | Explicit control flow; easy to add/remove nodes; built-in streaming |
-| ReAct loop (Think → Act → Observe) | Agent reasons before and after each tool call — far more reliable than one-shot |
-| Docker code sandbox | Prevents prompt-injection attacks from causing the agent to exfiltrate data or call external APIs |
-| SSE streaming | Client sees agent reasoning in real time; UX feels interactive even on 60-second queries |
-| ChromaDB memory | Agent can retrieve relevant past findings to avoid redundant searches |
-| DuckDuckGo (no API key) | Zero cost; good enough for most research tasks |
+|----------|-----|
+| **LangGraph** state machine | Explicit control flow; deterministic routing between loop/next-task/synthesize |
+| **ReAct pattern** | Agent reasons before and after every tool call — far more reliable than one-shot prompting |
+| **Docker sandbox** | Prevents prompt-injection attacks from running malicious code or leaking data |
+| **SSE streaming** | Client sees agent reasoning in real time — feels interactive even on 60s queries |
+| **ChromaDB memory** | Semantic search lets agent retrieve relevant past findings to avoid redundant searches |
+| **DuckDuckGo** (no API key) | Zero cost; sufficient for most research tasks |
 
 ---
 
-## Resume bullets
+##  Running Tests
+
+```bash
+# Unit tests only (no API key needed)
+pytest tests/ -v -m "not integration"
+
+# All tests including end-to-end
+pytest tests/ -v
+```
+
+---
+
+##  Docker Compose
+
+```bash
+docker compose up --build
+```
+
+Starts the agent on port 8000 with outputs mounted at `./outputs` and ChromaDB persisted at `./chroma_db`.
+
+---
+
+## Resume Bullets
 
 ```
-Autonomous Research Agent | Python, LangGraph, Anthropic API, Docker, FastAPI
+Autonomous Research Agent | Python · LangGraph · Google Gemini · Docker · FastAPI
 
-• Designed and implemented a multi-step autonomous AI agent using a ReAct
-  (Reason + Act) loop with LangGraph, capable of decomposing open-ended
-  research queries into sub-tasks and self-directing tool use without human
-  intervention at each step.
+• Designed a multi-step autonomous AI agent using a ReAct (Reason + Act) loop
+  with LangGraph, capable of decomposing open-ended research queries into
+  parallel sub-tasks without human intervention at each step.
 
 • Built a Docker-sandboxed Python code execution tool with full network
-  isolation (network_disabled=True, read-only filesystem), preventing
-  prompt-injection-driven code from exfiltrating data.
+  isolation, preventing prompt-injection-driven code from exfiltrating data
+  or calling external services.
 
-• Implemented SSE streaming via FastAPI so clients observe agent reasoning
-  in real time, reducing perceived latency from ~60s to interactive feel.
+• Implemented server-sent event (SSE) streaming via FastAPI so clients
+  observe agent reasoning in real time, reducing perceived latency from
+  ~60s to an interactive feel.
 
 • Integrated a ChromaDB semantic memory layer enabling the agent to retrieve
   relevant past findings across iterations, reducing redundant tool calls.
-
-• Achieved X% task-completion rate on a Y-query benchmark (fill in after
-  you run your own eval).
 ```
+
+---
+
+##  Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| AI Model | Google Gemini 1.5 Flash |
+| Agent Framework | LangGraph 0.2, LangChain 0.3 |
+| Backend | FastAPI, Uvicorn, Python 3.11 |
+| Web Scraping | Playwright, BeautifulSoup4 |
+| Code Execution | Docker SDK (sandboxed) |
+| Memory | ChromaDB (vector store) |
+| Frontend | HTML/CSS/JS + SSE streaming |
+
+---
+
